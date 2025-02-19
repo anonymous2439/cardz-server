@@ -40,10 +40,10 @@ wss.on("connection", (ws) => {
 // Ping clients every 30 seconds
 setInterval(() => {
     wss.clients.forEach(ws => {
-        if (!ws.isAlive) {
-            console.log("Terminating inactive client");
-            return ws.terminate();
-        }
+        // if (!ws.isAlive) {
+        //     console.log("Terminating inactive client");
+        //     return ws.terminate();
+        // }
 
         ws.isAlive = false;
         ws.ping(); // Send ping
