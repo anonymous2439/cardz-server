@@ -3,10 +3,15 @@ const { WebSocketServer } = require("ws");
 // Create WebSocket server
 const wss = new WebSocketServer({ port: 8081 });
 
-// Broadcast player count
-const broadcastPlayerCount = () => {
-    const playerCount = wss.clients.size;
-    wss.clients.forEach(client => {
+// Store rooms with players
+const rooms = new Map(); // { roomId: Set(sockets) }
+
+// Broadcast player count for a specific room
+const broadcastPlayerCount = (roomId) => {
+    if (!rooms.has(roomId)) return;
+
+    const playerCount = rooms.get(roomId).size;
+    rooms.get(roomId).forEach(client => {
         if (client.readyState === client.OPEN) {
             client.send(JSON.stringify({ type: "updatePlayerCount", data: playerCount }));
         }
@@ -16,14 +21,41 @@ const broadcastPlayerCount = () => {
 wss.on("connection", (ws) => {
     console.log("Client connected");
     ws.isAlive = true; // Mark client as alive
-    broadcastPlayerCount();
+    let roomId = null; // Store the room the player joins
 
     ws.on("message", (message) => {
-        wss.clients.forEach(client => {
-            if (client !== ws && client.readyState === client.OPEN) {
-                client.send(JSON.stringify({ type: "updatePlayers", data: JSON.parse(message.toString()) }));
+        const data = JSON.parse(message.toString());
+
+        if (data.type === "join_room") {
+            // Assign the player to a room
+            roomId = data.roomId;
+
+            if (!rooms.has(roomId)) {
+                rooms.set(roomId, new Set());
             }
-        });
+            rooms.get(roomId).add(ws);
+
+            console.log(`Client joined room: ${roomId}`);
+            broadcastPlayerCount(roomId);
+            return;
+        }
+
+        // old way
+        // wss.clients.forEach(client => {
+        //     if (client !== ws && client.readyState === client.OPEN) {
+        //         client.send(JSON.stringify({ type: "updatePlayers", data: JSON.parse(message.toString()) }));
+        //     }
+        // });
+
+
+        if (roomId && data.type === "updatePlayers") {
+            // Broadcast only within the room
+            rooms.get(roomId).forEach(client => {
+                if (client !== ws && client.readyState === client.OPEN) {
+                    client.send(JSON.stringify({ type: "updatePlayers", data }));
+                }
+            });
+        }
     });
 
     ws.on("pong", () => {
@@ -32,22 +64,23 @@ wss.on("connection", (ws) => {
 
     ws.on("close", () => {
         console.log("Client disconnected");
-        if (wss.clients.size > 0)
-            setTimeout(() => broadcastPlayerCount(), 100);
+
+        if (roomId && rooms.has(roomId)) {
+            rooms.get(roomId).delete(ws);
+            if (rooms.get(roomId).size === 0) {
+                rooms.delete(roomId); // Remove empty room
+            }
+            setTimeout(() => broadcastPlayerCount(roomId), 100);
+        }
     });
 });
 
 // Ping clients every 30 seconds
 setInterval(() => {
     wss.clients.forEach(ws => {
-        // if (!ws.isAlive) {
-        //     console.log("Terminating inactive client");
-        //     return ws.terminate();
-        // }
-
         ws.isAlive = false;
         ws.ping(); // Send ping
     });
-}, 30000); // Check every 30 seconds
+}, 30000);
 
 console.log("WebSocket server is running");
