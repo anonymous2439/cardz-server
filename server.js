@@ -1,9 +1,11 @@
 const { WebSocketServer } = require("ws");
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const mysql = require("mysql2");
 const app = express();
+const SECRET_KEY = "mysuperdupersecretkey"
 
 /**
  * Initialize database
@@ -33,6 +35,27 @@ app.use(cors({
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
+
+
+/**
+ * Middleware
+ */
+
+const verifyToken = (req, res, next) => {
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) return res.status(403).json({ success: false, message: "No token provided" });
+
+    jwt.verify(token, SECRET_KEY, (err, decoded) => {
+        if (err) return res.status(401).json({ success: false, message: "Invalid token" });
+
+        req.user = decoded; // Attach user info to request
+        next();
+    });
+};
+
+
+
 // Middleware to parse JSON requests
 app.use(express.json());
 
@@ -46,7 +69,7 @@ app.post("/signup", async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
-        return res.status(400).json({ success: false, message: "Username and password are required" });
+        return res.status(200).json({ success: false, message: "Username and password are required" });
     }
 
     try {
@@ -59,7 +82,7 @@ app.post("/signup", async (req, res) => {
         db.query(sql, [username, hashedPassword], (err, result) => {
             if (err) {
                 console.error("Database error:", err);
-                return res.status(500).json({ success: false, message: "Database error" });
+                return res.status(200).json({ success: false, message: "Database error" });
             }
             res.status(201).json({ success: true, message: "User registered successfully!" });
         });
@@ -71,25 +94,59 @@ app.post("/signup", async (req, res) => {
 });
 
 
+app.post("/login", async (req, res) => {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: "Username and password are required" });
+    }
+
+    try {
+        // 🔍 Check if the user exists
+        const sql = "SELECT * FROM users WHERE username = ?";
+        db.query(sql, [username], async (err, results) => {
+            if (err) {
+                console.error("Database error:", err);
+                return res.status(500).json({ success: false, message: "Database error" });
+            }
+
+            if (results.length === 0) {
+                return res.status(200).json({ success: false, message: "Invalid username or password" });
+            }
+
+            // 🛡️ Compare the hashed password
+            const user = results[0];
+            const isMatch = await bcrypt.compare(password, user.password);
+
+            if (!isMatch) {
+                return res.status(200).json({ success: false, message: "Invalid username or password" });
+            }
+
+            // Generate JWT token
+            const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: "1h" });
+
+            const resData = {
+                token, 
+                user: { id: user.id, username: user.username },
+            }
+
+            // ✅ Login successful
+            res.status(200).json({ success: true, message: "Login successful!", data: resData });
+        });
+
+    } catch (error) {
+        console.error("Error during login:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+
+
 // Start server
 const PORT = 8082;
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
-
-
-// test database
-// const sql = "SELECT * FROM users;";
-// db.query(sql, (err, result) => {
-//     if (err) {
-//         console.error("Error getting messages from database:", err);
-//     } else {
-//         result.forEach(res => {
-//             let response = JSON.stringify(res);
-//             console.log("response:",response)
-//         });
-//     }
-// });
 
 
 
